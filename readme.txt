@@ -34,3 +34,9 @@ xtts(https://huggingface.co/coqui/XTTS-v2)
 italian
 13000
 
+
+
+Результаты:
+
+cosy voice 3 генерация с использованием RTX 4060 laptop GPU начата 29.12 в 4 часа ночи
+
