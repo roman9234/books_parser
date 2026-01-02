@@ -93,8 +93,8 @@ class ParserConfig:
     max_words: int = 70
     allowed_special_chars: str = r"[\w\s,.!?;'\"àèéíïòóúüçÀÈÉÍÏÒÓÚÜÇ·¿¡]"  # Каталанские символы + пунктуация
     sentence_delimiters: str = r'[.!?;]+'  # Разделители предложений
-    min_sentence_length: int = 20
-    max_sentence_length: int = 150  # Максимальная длина в символах (для оптимизации)
+    min_sentence_length: int = 40
+    max_sentence_length: int = 400  # Максимальная длина в символах (для оптимизации)
 
     # Слова-маркеры начала основного текста (для удаления предисловий и т.д.)
     text_start_markers: List[str] = None
@@ -202,20 +202,80 @@ class BookParser:
 
     def clean_sentence(self, sentence: str) -> str:
         """Очистка и форматирование предложения"""
+
+        sentence = re.sub(r'^CAP[ÍI]TOL?\s+[IVXLCDM\d]+[.:]?\s*', '', sentence, flags=re.IGNORECASE)
+
+        patterns_to_fix = [
+            (r'(\b[lLdDnNmMsS])([A-ZÀ-ÿ])', r'\1 \2'),  # lOest -> l Oest
+            (r'(\b[aAeEiIoOuU])([A-ZÀ-ÿ])', r'\1 \2'),  # aOest -> a Oest
+            (r'd([aeiouàèéíïòóúüAEIOUÀÈÉÍÏÒÓÚÜ])', r'd \1'),  # daquesta -> d aquesta
+            (r'l([aeiouàèéíïòóúüAEIOUÀÈÉÍÏÒÓÚÜ])', r'l \1'),  # lOest -> l Oest
+            (r'(\w)se(\s|$)', r'\1 se\2'),  # asense -> a sense
+            (r'(\w)li(\s|$)', r'\1 li\2'),  # delli -> de lli
+            (r'(\w)hi(\s|$)', r'\1 hi\2'),  # nhi -> n hi
+        ]
+
+        # 3. Удаляем изолированные запятые и точки (ошибки парсинга)
+        sentence = re.sub(r'\s*,\s*se[.,]?\s*', ' ', sentence)  # ", se" или ", se."
+        sentence = re.sub(r'\s*,\s*li\s*', ' ', sentence)  # ", li"
+        sentence = re.sub(r'\s*,\s*nhi\s*', ' ', sentence)  # ", nhi"
+        sentence = re.sub(r'\s*,\s*ad\s*', ' ', sentence)  # ", ad"
+
         # Удаляем лишние пробелы
         sentence = re.sub(r'\s+', ' ', sentence).strip()
+
+        # 1. Удаляем курсив (слова между подчёркиваниями _слово_)
+        # Оставляем только текст, удаляя подчёркивания
+        sentence = re.sub(r'_([^_]+)_', r'\1', sentence)
+
+        # 2. Удаляем кавычки разных типов (оставляем текст внутри)
+        sentence = re.sub(r'[\"«»"“”„‟]', '', sentence)  # Удаляем только кавычки, но не апостроф
+
+        # 3. Удаляем тире диалогов и заменяем их на запятые
+        sentence = re.sub(r'\s*[-—–]\s*', ', ', sentence)
+
+        # 4. Удаляем скобки и их содержимое (сноски, комментарии)
+        sentence = re.sub(r'\([^)]*\)', '', sentence)
+        sentence = re.sub(r'\[[^\]]*\]', '', sentence)
+
+        # 5. Удаляем специальные символы, которые могут мешать TTS
+        # Оставляем только буквы, цифры, пробелы и базовую пунктуацию
+        sentence = re.sub(r'[*#@$%&_+=|~<>/\\©®™•·]', '', sentence)
+
+        # 6. Удаляем многоточия и заменяем на точку
+        sentence = re.sub(r'\.{2,}', '.', sentence)
+
+        # 7. Удаляем лишние пробелы и нормализуем пробелы вокруг пунктуации
+        sentence = re.sub(r'\s+', ' ', sentence).strip()
+
+        # 8. Исправляем пробелы перед пунктуацией
+        sentence = re.sub(r'\s+([,.!?;:])', r'\1', sentence)
+
+        # 9. Добавляем пробелы после пунктуации (если нужно)
+        sentence = re.sub(r'([,.!?;:])(?!\s|$)', r'\1 ', sentence)
+
+        # 10. Проверяем наличие цифр в виде чисел (1, 2, 3...)
+        # Если есть цифры, проверяем, нужно ли преобразовывать
+        # Для каталанского используем num2words если нужно, но проще отбросить такие предложения
+        # В функции is_valid_sentence уже есть проверка на наличие цифр
+
+        # 11. Проверяем длину предложения (после очистки)
+        words = re.findall(r'\b[\wÀ-ÿ]+\b', sentence, re.UNICODE)
 
         # Убеждаемся, что начинается с заглавной буквы
         if sentence and not sentence[0].isupper():
             # Ищем первую букву (пропускаем кавычки и т.д.)
             for i, char in enumerate(sentence):
                 if char.isalpha():
-                    sentence = sentence[:i] + sentence[i].upper() + sentence[i+1:]
+                    sentence = sentence[i].upper() + sentence[i+1:]
                     break
 
         # Убеждаемся, что заканчивается точкой
         if sentence and not sentence[-1] in '.!?':
             sentence += '.'
+
+        if len(sentence.split()) < 3:  # Минимум 3 слова после очистки
+            return ""
 
         return sentence
 
